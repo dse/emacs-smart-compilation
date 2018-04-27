@@ -29,7 +29,12 @@
 
 ;;; Code:
 
-(defvar smart-compilation/command-project-file-alist
+(defcustom smart-compilation/debug nil
+  "If non-nil, display debug messages in the `*Messages*' buffer."
+  :group 'smart-compilation
+  :type '(boolean))
+
+(defcustom smart-compilation/command-project-file-alist
   '(("make" . ("GNUmakefile" "makefile" "Makefile")))
   "Alist of commands requiring a directory parent search and project files.
 
@@ -47,7 +52,11 @@ Example 1: the `gulp' command searches parent directories for
 
 Example 2: the `make' command does not search parent directories
 for `GNUmakefile', `makefile', and `Makefile', so you would need
-to include it in this alist.")
+to include it in this alist."
+  :group 'smart-compilation
+  :type '(alist :key-type string
+                :value-type (choice (string :tag "string")
+                                    (repeat (string)))))
 
 (defun smart-compilation/proglist ()
   "Return a list of programs requiring a directory parent search...
@@ -172,21 +181,25 @@ be searched."
 DIRECTORY is a directory name or file name of the directory.
 
 If DIRECTORY is NIL, the `default-directory' is used."
-  (let ((matching-command-name
-         (smart-compilation/command-begins-with command (smart-compilation/proglist))))
-    (if matching-command-name
-        (let ((project-filename
-               (cdr (assoc (downcase matching-command-name)
-                           smart-compilation/command-project-file-alist))))
-          (let ((project-root (smart-compilation/find-project-root project-filename directory)))
-            (if project-root
-                (concat "true && " ;work around compilation-start's handling of "cd"
-                        "cd "
-                        (shell-quote-argument (file-name-directory project-root))
-                        " && "
-                        command)
-              command)))
-      command)))
+  (let ((directory-name (file-name-as-directory (file-truename (or directory default-directory)))))
+    (let ((matching-command-name
+           (smart-compilation/command-begins-with command (smart-compilation/proglist))))
+      (if matching-command-name
+          (let ((project-filename
+                 (cdr (assoc (downcase matching-command-name)
+                             smart-compilation/command-project-file-alist))))
+            (let ((project-root (smart-compilation/find-project-root project-filename directory)))
+              (if project-root
+                  (let ((project-root-directory-name (file-name-as-directory (file-name-directory project-root))))
+                    (if (not (equal project-root-directory-name directory-name))
+                        (concat "true && " ;work around compilation-start's handling of "cd"
+                                "cd "
+                                (shell-quote-argument (file-name-directory project-root))
+                                " && "
+                                command)
+                      command))
+                command)))
+        command))))
 
 ;; (smart-compilation/command "make -k" "c:/cygwin64/home/501475791")
 ;; (smart-compilation/command "make -k" "c:/cygwin64/home/501475791/ConfigFiles")
@@ -203,8 +216,12 @@ COMMAND, MODE, NAME-FUNCTION, and HIGHLIGHT-REGEXP are as in
 This is used as an advice function around `compilation-start'
 when smart-compilation is enabled."
   (let ((final-command (smart-compilation/command command)))
-    (message "smart-compilation/compilation-start: original command was: %s" command)
-    (message "smart-compilation/compilation-start: final command is: %s" final-command)
+    (when smart-compilation/debug
+      (if (equal command final-command)
+          (message "smart-compilation/compilation-start: unchanged command: %s" command)
+        (progn
+          (message "smart-compilation/compilation-start: original command was: %s" command)
+          (message "smart-compilation/compilation-start: final command is: %s" final-command))))
     (apply orig-fun final-command mode name-function highlight-regexp)))
 
 ;;;###autoload
