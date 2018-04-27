@@ -44,7 +44,8 @@ Example 1: the `gulp' command searches parent directories for
 `gulpfile.js', so you do not need to include it.
 
 Example 2: the `make' command does not search parent directories
-for `Makefile', so you would need to include it in this alist.")
+for `GNUmakefile', `makefile', and `Makefile', so you would need
+to include it in this alist.")
 
 (defun smart-compilation/proglist ()
   "Return a list of programs requiring a directory parent search...
