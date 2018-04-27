@@ -35,13 +35,15 @@
 
 An associative list whose keys are commands and whose values are
 either project file names those commands look for or lists of
-file names.
+project file names.
+
+Keys must be entirely in lowercase.
 
 You only need to include commands that do not search parent
 directories for project files.
 
 Example 1: the `gulp' command searches parent directories for
-`gulpfile.js', so you do not need to include it.
+`gulpfile.js', so you do not need to include it in this alist.
 
 Example 2: the `make' command does not search parent directories
 for `GNUmakefile', `makefile', and `Makefile', so you would need
@@ -68,11 +70,7 @@ Returns NIL if none of the filenames are found."
       (dolist (filename filename-list)
         (let ((path (expand-file-name filename directory-name)))
           (if (file-exists-p path)
-              (progn
-                (message "%s exists in %s" filename directory-name)
-                (throw 'found-it path))
-            (message "%s does not exist in %s" filename directory-name)
-            ))))))
+              (throw 'found-it path)))))))
 
 (defun smart-compilation/directory-separator-regexp ()
   "Return a regexp that will match any directory separator character."
@@ -104,8 +102,7 @@ member of PROGNAME."
     (if (let ((case-fold-search t))
           (string-match (smart-compilation/command-path-name-regexp progname)
                         first-command-name))
-        (match-string 1 first-command-name)
-      nil)))
+        (match-string 1 first-command-name))))
 
 ;; (smart-compilation/command-begins-with "make" "make")
 ;; (smart-compilation/command-begins-with "make" '("make" "gulp"))
@@ -123,7 +120,7 @@ member of PROGNAME."
 ;; (smart-compilation/command-begins-with "make -k " "make")
 ;; (smart-compilation/command-begins-with " make -k " "make")
 ;; (smart-compilation/command-begins-with " c:\\gnu\\bin\\make -k " "make")
-;; (smart-compilation/command-begins-with " 'c:\\gnu\\bin\\make' -k " "make")
+;; (smart-compilation/command-begins-with " 'c:\\gnu\\bin\\make' -k " "make") ;; single quote should work but doesn't
 ;; (smart-compilation/command-begins-with " \"c:\\\\gnu\\\\bin\\\\make\" -k " "make")
 ;; (smart-compilation/command-begins-with " cd foo && \"c:\\\\gnu\\\\bin\\\\make\" -k " "make")
 
@@ -160,11 +157,40 @@ be searched."
       (let ((path (expand-file-name filename directory)))
         (if (file-exists-p path)
             path
-          (progn
-            (message "%s does not exist" path)
-            (if is-root
-                nil
-              (smart-compilation/find-project-root filename parent-directory-name))))))))
+          (if is-root
+              nil
+            (smart-compilation/find-project-root filename parent-directory-name)))))))
+
+;; (smart-compilation/find-project-root "Makefile" "c:/cygwin64/home/501475791")
+;; (smart-compilation/find-project-root "Makefile" "c:/cygwin64/home/501475791/ConfigFiles")
+;; (smart-compilation/find-project-root "Makefile" "c:/cygwin64/home/501475791/ConfigFiles/common")
+;; (smart-compilation/find-project-root '("GNUmakefile" "makefile" "Makefile") "c:/cygwin64/home/501475791/ConfigFiles/common")
+
+(defun smart-compilation/command (command &optional directory)
+  "Return new command smart-compilation will run, based on COMMAND.
+
+DIRECTORY is a directory name or file name of the directory.
+
+If DIRECTORY is NIL, the `default-directory' is used."
+  (let ((matching-command-name
+         (smart-compilation/command-begins-with command (smart-compilation/proglist))))
+    (if matching-command-name
+        (let ((project-filename
+               (cdr (assoc (downcase matching-command-name)
+                           smart-compilation/command-project-file-alist))))
+          (let ((project-root (smart-compilation/find-project-root project-filename directory)))
+            (if project-root
+                (concat "true && " ;work around compilation-start's handling of "cd"
+                        "cd "
+                        (shell-quote-argument (file-name-directory project-root))
+                        " && "
+                        command)
+              command)))
+      command)))
+
+;; (smart-compilation/command "make -k" "c:/cygwin64/home/501475791")
+;; (smart-compilation/command "make -k" "c:/cygwin64/home/501475791/ConfigFiles")
+;; (smart-compilation/command "make -k" "c:/cygwin64/home/501475791/ConfigFiles/common")
 
 (defun smart-compilation/compilation-start (orig-fun command &optional mode name-function highlight-regexp)
   "Change directory to the project root if needed, and run `compilation-start'.
@@ -174,35 +200,60 @@ ORIG-FUN is the original `compilation-start' function.
 COMMAND, MODE, NAME-FUNCTION, and HIGHLIGHT-REGEXP are as in
 `compilation-start'.
 
-This is an advice function around `compilation-start'."
-  (message "smart-compilation/compilation-start: command is: %s" command)
-  (let ((matching-command-name
-         (smart-compilation/command-begins-with command (smart-compilation/proglist))))
-    (if matching-command-name
-        (let* ((matching-command-name-downcase (downcase matching-command-name))
-               (project-filename (cdr (assoc matching-command-name-downcase smart-compilation/command-project-file-alist))))
-          (let ((project-root (smart-compilation/find-project-root project-filename)))
-            (if project-root
-                (let ((new-command (concat "true && " ;work around compilation-start's handling of "cd"
-                                           "cd "
-                                           (shell-quote-argument (file-name-directory project-root))
-                                           " && "
-                                           command)))
-                  (progn
-                    (message "smart-compilation/compilation-start: new command is: %s" new-command)
-                    (apply orig-fun new-command mode name-function highlight-regexp)))
-              (apply orig-fun command mode name-function highlight-regexp))))
-      (apply orig-fun command mode name-function highlight-regexp))))
+This is used as an advice function around `compilation-start'
+when smart-compilation is enabled."
+  (let ((final-command (smart-compilation/command command)))
+    (message "smart-compilation/compilation-start: original command was: %s" command)
+    (message "smart-compilation/compilation-start: final command is: %s" final-command)
+    (apply orig-fun final-command mode name-function highlight-regexp)))
 
 ;;;###autoload
 (defun smart-compilation-enable ()
   "Enable smart-compilation."
-  (advice-add 'compilation-start :around #'smart-compilation/compilation-start))
+  (if (not (smart-compilation-enabled-p))
+      (advice-add 'compilation-start :around #'smart-compilation/compilation-start)))
 
 ;;;###autoload
 (defun smart-compilation-disable ()
   "Disable smart-compilation."
-  (advice-remove 'compilation-start #'smart-compilation/compilation-start))
+  (if (smart-compilation-enabled-p)
+      (advice-remove 'compilation-start #'smart-compilation/compilation-start)))
+
+;;;###autoload
+(defun smart-compilation-enabled-p ()
+  "Return T if smart-compilation is enabled, NIL otherwise."
+  (advice-member-p #'smart-compilation/compilation-start #'compilation-start))
+
+;;;###autoload
+(defun smart-compilation-always-toggle ()
+  "Always toggle smart-compilation."
+  (if (smart-compilation-enabled-p)
+      (smart-compilation-disable)
+    (smart-compilation-enable)))
+
+;;;###autoload
+(defun smart-compilation-toggle (&optional arg)
+  "Toggle, or turn on or off, smart-compilation.
+
+If optional prefix argument ARG is positive, turn smart-compilation on.
+
+If ARG is negative, turn smart-compilation off.
+
+Otherwise, toggle smart-compilation."
+  (interactive "P")                     ;raw form
+  (cond ((null arg)                     ;no prefix arg specified
+         (smart-compilation-always-toggle))
+        ((eq arg '-)                    ;M-- M-x ...
+         (smart-compilation-disable))
+        ((numberp arg)
+         (cond ((> arg 0) (smart-compilation-enable))
+               ((< arg 0) (smart-compilation-disable))
+               (t         (smart-compilation-toggle))))
+        (t                              ;do we ever get here?
+         (smart-compilation-always-toggle)))
+  (if (smart-compilation-enabled-p)
+      (message "%s" "smart-compilation is enabled.")
+    (message "%s" "smart-compilation is disabled.")))
 
 (provide 'smart-compilation)
 ;;; smart-compilation.el ends here
