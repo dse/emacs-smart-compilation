@@ -21,15 +21,16 @@
 ;;; Commentary:
 
 ;; Certain project compilation tools including `make' do not search
-;; parent directories until they find a `Makefile`.  This package
-;; implements an advice function around the low-level function
-;; `compilation-start' that provide `M-x compile' and other functions
-;; that use it with that functionality.
+;; parent directories until they find a `Makefile`, while other tools
+;; such as `gulp' do.  This package implements an advice function
+;; around the low-level function `compilation-start' that provides
+;; `M-x compile' and other functions that use it with that
+;; functionality.
 
 ;;; Code:
 
 (defvar smart-compilation/command-project-file-alist
-  '(("make" . ("Makefile" "makefile")))
+  '(("make" . ("GNUmakefile" "makefile" "Makefile")))
   "Alist of commands requiring a directory parent search and project files.
 
 An associative list whose keys are commands and whose values are
