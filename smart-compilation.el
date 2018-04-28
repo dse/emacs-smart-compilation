@@ -241,7 +241,6 @@ when smart-compilation is enabled."
   "Return T if smart-compilation is enabled, NIL otherwise."
   (advice-member-p #'smart-compilation/compilation-start #'compilation-start))
 
-;;;###autoload
 (defun smart-compilation-always-toggle ()
   "Always toggle smart-compilation."
   (if (smart-compilation-enabled-p)
